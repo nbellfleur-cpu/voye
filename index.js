@@ -11,26 +11,36 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Railway Postgres requires SSL with rejectUnauthorized: false
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
 async function initDB() {
   try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, name VARCHAR(255), created_at TIMESTAMP DEFAULT NOW())`);
-    console.log('Database initialized');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        name VARCHAR(255),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('Database initialized successfully');
   } catch (err) {
     console.error('DB init error:', err.message);
   }
 }
 
+// Health check - matches expected response
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', app: 'voye', version: '1.0.0' });
+  res.json({ status: 'ok', app: 'Voye', version: '1.0.0' });
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'healthy' });
+  res.json({ status: 'ok', app: 'Voye' });
 });
 
 function authMiddleware(req, res, next) {
@@ -49,7 +59,10 @@ app.post('/api/auth/register', async (req, res) => {
     const { email, password, name } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
     const hashed = await bcrypt.hash(password, 10);
-    const result = await pool.query('INSERT INTO users (email, password, name) VALUES ($1, $2, $3) RETURNING id, email, name', [email, hashed, name]);
+    const result = await pool.query(
+      'INSERT INTO users (email, password, name) VALUES ($1, $2, $3) RETURNING id, email, name',
+      [email, hashed, name]
+    );
     const user = result.rows[0];
     const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
     res.status(201).json({ user, token });
